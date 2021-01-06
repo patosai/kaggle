@@ -56,7 +56,7 @@ def transform_row(row):
     # - Cabin: 687
     # - Embarked: 2
     row["PassengerId"] = int(row["PassengerId"])
-    if row["Survived"]:
+    if "Survived" in row:
         row["Survived"] = int(row["Survived"])
 
     # 1, 2, or 3
@@ -66,6 +66,8 @@ def transform_row(row):
 
     if row["Age"]:
         row["Age"] = float(row["Age"])
+    else:
+        row["Age"] = 35.0
 
     if row["Cabin"]:
         # some in the data have multiple cabins, just take the first one
@@ -83,7 +85,10 @@ def transform_row(row):
     row["SibSp"] = int(row["SibSp"])
     row["Parch"] = int(row["Parch"])
     #row["Ticket"] = int(row["Ticket"])
-    row["Fare"] = float(row["Fare"])
+    if row["Fare"]:
+        row["Fare"] = float(row["Fare"])
+    else:
+        row["Fare"] = 0.0
 
     row["Embarked-Cherbourg"] = row["Embarked"] == "C"
     row["Embarked-Queenstown"] = row["Embarked"] == "Q"
@@ -96,7 +101,7 @@ def row_to_model_input(row):
         row["Pclass"] == 1,
         row["Pclass"] == 2,
         row["Pclass"] == 3,
-        row["Age"] or 35,
+        row["Age"],
         row.get("Cabin", {}).get("deck") == "A",
         row.get("Cabin", {}).get("deck") == "B",
         row.get("Cabin", {}).get("deck") == "C",
@@ -134,9 +139,8 @@ def train():
     dataset = [[row_to_model_input(row), row_to_model_label(row)] for row in train_data]
     train_loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
     model = torch.nn.Sequential(
-        torch.nn.Linear(len(dataset[0][0]), 20),
-        torch.nn.Linear(20, 10),
-        torch.nn.Linear(10, 1),
+        torch.nn.Linear(len(dataset[0][0]), 16),
+        torch.nn.Linear(16, 1),
         torch.nn.Sigmoid()
     )
     loss_fn = torch.nn.MSELoss(reduction='sum')
@@ -171,7 +175,26 @@ def train():
 
 
 def read_test_data():
-    pass
+    with open("data/test.csv") as csv_file:
+        csv_reader = csv.DictReader(csv_file)
+        rows = []
+        for row in csv_reader:
+            row = transform_row(row)
+            rows.append(row)
+        return rows
+
+
+def run_test_extrapolation(pytorch_model):
+    test_data = read_test_data()
+    test_inputs = torch.FloatTensor([row_to_model_input(row) for row in test_data])
+    outputs = pytorch_model(test_inputs) > 0.5
+    with open('test_output.csv', 'w') as csvfile:
+        fieldnames = ['PassengerId', 'Survived']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for idx in range(len(test_inputs)):
+            writer.writerow({'PassengerId': test_data[idx]["PassengerId"],
+                             'Survived': 1 if outputs[idx].item() else 0})
 
 
 if __name__ == "__main__":
@@ -184,4 +207,5 @@ if __name__ == "__main__":
     # plt.ylabel("Survived")
     # plt.show()
     model = train()
+    run_test_extrapolation(model)
 
