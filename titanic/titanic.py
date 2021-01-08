@@ -110,6 +110,8 @@ def train():
     train_loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
     model = torch.nn.Sequential(
         torch.nn.Linear(len(dataset[0][0]), 16),
+        torch.nn.Linear(16, 16),
+        torch.nn.Linear(16, 16),
         torch.nn.Linear(16, 8),
         torch.nn.Linear(8, 8),
         torch.nn.Linear(8, 8),
