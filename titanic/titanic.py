@@ -8,41 +8,6 @@ import re
 import torch
 
 
-class MixtureOfLogistics(torch.nn.Module):
-    def __init__(self, cardinality, num_logistics):
-        super(MixtureOfLogistics, self).__init__()
-        self.cardinality = cardinality
-        self.num_logistics = num_logistics
-        self.mu = torch.nn.Parameter(torch.arange(0,
-                                                  self.cardinality,
-                                                  self.cardinality/self.num_logistics,
-                                                  dtype=torch.float))
-        self.pi = torch.nn.Parameter(torch.ones(num_logistics,
-                                                dtype=torch.float) / num_logistics)
-        self.s = torch.nn.Parameter(torch.ones(num_logistics,
-                                               dtype=torch.float))
-
-    def forward(self, x):
-        x = torch.Tensor(x)
-        # num_values x num_logistics
-        x = x.unsqueeze(1).repeat(1, self.num_logistics)
-        upper_cdf = torch.where(x >= self.cardinality - 1,
-                                torch.ones(x.size()),
-                                torch.sigmoid((x + 0.5 - self.mu)/self.s))
-        lower_cdf = torch.where(x == 0,
-                                torch.zeros(x.size()),
-                                torch.sigmoid((x - 0.5 - self.mu)/self.s))
-        summed_sigmoids = upper_cdf - lower_cdf
-
-        pi_softmax = torch.nn.functional.softmax(self.pi, dim=0)
-        weighted_sum = pi_softmax * summed_sigmoids
-        final_probability = torch.sum(weighted_sum, dim=1)
-        return final_probability
-
-    def loss(self, x):
-        return -torch.mean(torch.log(self(x)))
-
-
 def transform_row(row):
     # in train dataset, everyone has a
     # - Pclass
