@@ -3,6 +3,7 @@
 import csv
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 import re
 import torch
 
@@ -63,6 +64,8 @@ def transform_row(row):
     row["Pclass"] = int(row["Pclass"])
 
     # Sex can be "male" or "female"
+    row["Sex-male"] = row["Sex"] == "male"
+    row["Sex-female"] = row["Sex"] == "female"
 
     if row["Age"]:
         row["Age"] = float(row["Age"])
@@ -102,6 +105,8 @@ def row_to_model_input(row):
         row["Pclass"] == 2,
         row["Pclass"] == 3,
         row["Age"],
+        row["Sex-male"],
+        row["Sex-female"],
         row.get("Cabin", {}).get("deck") == "A",
         row.get("Cabin", {}).get("deck") == "B",
         row.get("Cabin", {}).get("deck") == "C",
@@ -145,8 +150,8 @@ def train():
     )
     loss_fn = torch.nn.MSELoss(reduction='sum')
     optimizer = torch.optim.SGD(model.parameters(), lr=0.001)
-    running_loss = 0.0
-    for epoch in range(10):
+    for epoch in range(100):
+        running_loss = 0.0
         for i, (inputs, labels) in enumerate(train_loader):
             # zero the parameter gradients
             optimizer.zero_grad()
@@ -157,11 +162,10 @@ def train():
             loss.backward()
             optimizer.step()
 
-            # print statistics
             running_loss += loss.item()
-            print('[%d, %5d] loss: %.3f' %
-                  (epoch + 1, i + 1, running_loss / 100))
-            running_loss = 0.0
+        # print statistics
+        print('[epoch %d] loss: %.3f' %
+              (epoch + 1, running_loss / len(train_data)))
     print('finished training')
 
     with torch.no_grad():
@@ -188,6 +192,7 @@ def run_test_extrapolation(pytorch_model):
     test_data = read_test_data()
     test_inputs = torch.FloatTensor([row_to_model_input(row) for row in test_data])
     outputs = pytorch_model(test_inputs) > 0.5
+    os.remove('test_output.csv')
     with open('test_output.csv', 'w') as csvfile:
         fieldnames = ['PassengerId', 'Survived']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
