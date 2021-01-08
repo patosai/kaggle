@@ -183,5 +183,6 @@ if __name__ == "__main__":
     # plt.ylabel("Survived")
     # plt.show()
     model = train()
+    torch.save(model, "model.pt")
     run_test_extrapolation(model)
 
