@@ -107,14 +107,11 @@ def read_train_data():
 def train():
     train_data = read_train_data()
     dataset = [[row_to_model_input(row), row_to_model_label(row)] for row in train_data]
-    train_loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
+    train_loader = torch.utils.data.DataLoader(dataset, batch_size=8, shuffle=True)
     model = torch.nn.Sequential(
         torch.nn.Linear(len(dataset[0][0]), 16),
         torch.nn.Linear(16, 16),
-        torch.nn.Linear(16, 16),
         torch.nn.Linear(16, 8),
-        torch.nn.Linear(8, 8),
-        torch.nn.Linear(8, 8),
         torch.nn.Linear(8, 8),
         torch.nn.Linear(8, 1),
         torch.nn.Sigmoid()
