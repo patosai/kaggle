@@ -1,185 +1,127 @@
 #!/usr/bin/env python3
 
 import csv
+import re
+import math
 import matplotlib.pyplot as plt
 import numpy as np
-import os
-import re
-import torch
+import pandas
+import random
+from sklearn.ensemble import RandomForestClassifier
 
 
-def transform_row(row):
-    # in train dataset, everyone has a
-    # - Pclass
-    # - Sex
-    # - SibSp
-    # - Parch
-    # - Ticket
-    # - Fare
-
-    # some are missing
-    # - Age: 177
-    # - Cabin: 687
-    # - Embarked: 2
-    row["PassengerId"] = int(row["PassengerId"])
-    if "Survived" in row:
-        row["Survived"] = int(row["Survived"])
-
-    # 1, 2, or 3
-    row["Pclass"] = int(row["Pclass"])
-
-    # Sex can be "male" or "female"
-    row["Sex-male"] = row["Sex"] == "male"
-    row["Sex-female"] = row["Sex"] == "female"
-
-    if row["Age"]:
-        row["Age"] = float(row["Age"])
-    else:
-        row["Age"] = 35.0
-
-    if row["Cabin"]:
-        # some in the data have multiple cabins, just take the first one
-        # Titanic has cabins from A to G deck
-        match = re.match(r"([A-G])(\d+)", row["Cabin"])
-        if match:
-            deck, number = match.groups()
-            row["Cabin"] = {"deck": deck,
-                            "number": int(number)}
-        else:
-            row.pop('Cabin')
-    else:
-        row.pop('Cabin')
-
-    row["SibSp"] = int(row["SibSp"])
-    row["Parch"] = int(row["Parch"])
-    #row["Ticket"] = int(row["Ticket"])
-    if row["Fare"]:
-        row["Fare"] = float(row["Fare"])
-    else:
-        row["Fare"] = 0.0
-
-    row["Embarked-Cherbourg"] = row["Embarked"] == "C"
-    row["Embarked-Queenstown"] = row["Embarked"] == "Q"
-    row["Embarked-Southampton"] = row["Embarked"] == "S"
-    return row
+def read_file(filename):
+    print(f'Reading file {filename}')
+    data = []
+    with open(filename) as csv_file:
+        reader = csv.DictReader(csv_file)
+        for row in reader:
+            data.append(row)
+    return data
 
 
-def row_to_model_input(row):
-    output = np.array([
-        row["Pclass"] == 1,
-        row["Pclass"] == 2,
-        row["Pclass"] == 3,
-        row["Age"],
-        row["Sex-male"],
-        row["Sex-female"],
-        row.get("Cabin", {}).get("deck") == "A",
-        row.get("Cabin", {}).get("deck") == "B",
-        row.get("Cabin", {}).get("deck") == "C",
-        row.get("Cabin", {}).get("deck") == "D",
-        row.get("Cabin", {}).get("deck") == "E",
-        row.get("Cabin", {}).get("deck") == "F",
-        row.get("Cabin", {}).get("deck") == "G",
-        # don't use cabin number.. for now
-        row["SibSp"],
-        row["Parch"],
-        row["Fare"],
-        row["Embarked-Cherbourg"],
-        row["Embarked-Queenstown"],
-        row["Embarked-Southampton"]
-    ], dtype=np.float32)
-    return output
+def split_train_validation(data, split_percentage=0.8):
+    print(f'Splitting train/validation set')
+    data_length = len(data)
+    index_to_split = int(data_length * split_percentage)
+    random.seed(42)
+    random.shuffle(data)
+    return data[:index_to_split], data[index_to_split:]
 
 
-def row_to_model_label(row):
-    return np.float32([row["Survived"]])
+def extract_features(data, extract_labels=True):
+    print(f'Extracting features')
+    features = []
+    labels = []
+    for row in data:
+        sex_classification = {"male": 0, "female": 1}[row["Sex"]]
+        age_classification = -1
+        if row["Age"]:
+            # classification buckets created using pandas.qcut(data["Age"], 4)
+            # split training data equally into 4 parts
+            age = float(row["Age"])
+            if age < 20.125:
+                age_classification = 0
+            elif age < 28:
+                age_classification = 1
+            elif age < 38:
+                age_classification = 2
+            elif age < 80:
+                age_classification = 3
+
+        family_size = 1
+        if row["SibSp"]:
+            family_size += int(row["SibSp"])
+        if row["Parch"]:
+            family_size += int(row["Parch"])
+
+        feature_row = [
+            row["Pclass"],
+            sex_classification,
+            age_classification,
+            family_size
+            # TODO title
+        ]
+        features.append(feature_row)
+        if extract_labels:
+            labels.append(int(row["Survived"]))
+    return features, labels
 
 
-def read_train_data():
-    with open("data/train.csv") as csv_file:
-        csv_reader = csv.DictReader(csv_file)
-        rows = []
-        for row in csv_reader:
-            row = transform_row(row)
-            rows.append(row)
-        return rows
+def train_classifier(features, labels):
+    print(f'Training')
+    labels_one_hot = np.identity(2)[labels]
+    rf = RandomForestClassifier(n_estimators=1000, random_state=42)
+    rf.fit(features, labels_one_hot)
+    return rf
 
 
-def train():
-    train_data = read_train_data()
-    dataset = [[row_to_model_input(row), row_to_model_label(row)] for row in train_data]
-    train_loader = torch.utils.data.DataLoader(dataset, batch_size=8, shuffle=True)
-    model = torch.nn.Sequential(
-        torch.nn.Linear(len(dataset[0][0]), 16),
-        torch.nn.Linear(16, 16),
-        torch.nn.Linear(16, 8),
-        torch.nn.Linear(8, 8),
-        torch.nn.Linear(8, 1),
-        torch.nn.Sigmoid()
-    )
-    loss_fn = torch.nn.MSELoss(reduction='sum')
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.001)
-    for epoch in range(100):
-        running_loss = 0.0
-        for i, (inputs, labels) in enumerate(train_loader):
-            # zero the parameter gradients
-            optimizer.zero_grad()
-
-            # forward + backward + optimize
-            outputs = model(inputs)
-            loss = loss_fn(outputs, labels)
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-        # print statistics
-        print('[epoch %d] loss: %.3f' %
-              (epoch + 1, running_loss / len(train_data)))
-    print('finished training')
-
-    with torch.no_grad():
-        all_inputs = torch.FloatTensor([data[0] for data in dataset])
-        all_labels = torch.FloatTensor([data[1] for data in dataset])
-        all_outputs = model(all_inputs)
-        loss = loss_fn(all_outputs, all_labels)
-        print('total train loss: %.3f' % (loss.item() / len(all_inputs)))
-
-    return model
+def predict_classification(classifier, features):
+    print(f'Predicting')
+    prediction = np.asarray(classifier.predict(features), dtype=int)
+    # return classification, not one-hot
+    return prediction[:, 1]
 
 
-def read_test_data():
-    with open("data/test.csv") as csv_file:
-        csv_reader = csv.DictReader(csv_file)
-        rows = []
-        for row in csv_reader:
-            row = transform_row(row)
-            rows.append(row)
-        return rows
+def run_train_with_validation():
+    all_train_data = read_file("data/train.csv")
+    train_data, validation_data = split_train_validation(all_train_data, split_percentage=0.8)
+
+    train_features, train_labels = extract_features(train_data)
+
+    classifier = train_classifier(train_features, train_labels)
+
+    validation_features, validation_labels = extract_features(validation_data)
+
+    validation_results = predict_classification(classifier, validation_features)
+    validation_accuracy = (validation_labels == validation_results).mean()
+    print(f'Validation accuracy: {validation_accuracy:.5f}')
+    return classifier
 
 
-def run_test_extrapolation(pytorch_model):
-    test_data = read_test_data()
-    test_inputs = torch.FloatTensor([row_to_model_input(row) for row in test_data])
-    outputs = pytorch_model(test_inputs) > 0.5
-    os.remove('test_output.csv')
-    with open('test_output.csv', 'w') as csvfile:
+def run_train():
+    print("Running train on full dataset")
+    train_data = read_file("data/train.csv")
+    train_features, train_labels = extract_features(train_data)
+    return train_classifier(train_features, train_labels)
+
+
+def create_test_predictions():
+    print("Creating test predictions")
+    classifier = run_train()
+    test_data = read_file("data/test.csv")
+    test_features, _ = extract_features(test_data, extract_labels=False)
+    predictions = predict_classification(classifier, test_features)
+
+    out_filename = "predictions.csv"
+    print(f"Writing to {out_filename}")
+    with open(out_filename, 'w') as csv_file:
         fieldnames = ['PassengerId', 'Survived']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
-        for idx in range(len(test_inputs)):
-            writer.writerow({'PassengerId': test_data[idx]["PassengerId"],
-                             'Survived': 1 if outputs[idx].item() else 0})
+        for row, prediction in zip(test_data, predictions):
+            writer.writerow({"PassengerId": row["PassengerId"], "Survived": prediction})
 
 
-if __name__ == "__main__":
-    # data = read_train_data()
-    # decks = [row['Cabin']['deck'] for row in data if 'Cabin' in row]
-    # cabin = [ord(deck) - ord('A') for deck in decks]
-    # survived = [row["Survived"] for row in data if 'Cabin' in row]
-    # plt.hist2d(cabin, survived, bins=[8, 2])
-    # plt.xlabel("Cabin")
-    # plt.ylabel("Survived")
-    # plt.show()
-    model = train()
-    torch.save(model, "model.pt")
-    run_test_extrapolation(model)
-
+#_classifier = run_train_with_validation()
+create_test_predictions()
