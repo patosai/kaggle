@@ -24,7 +24,7 @@ def split_train_validation(data, split_percentage=0.8):
     print(f'Splitting train/validation set')
     data_length = len(data)
     index_to_split = int(data_length * split_percentage)
-    random.seed(42)
+    random.seed()
     random.shuffle(data)
     return data[:index_to_split], data[index_to_split:]
 
@@ -33,6 +33,7 @@ def extract_features(data, extract_labels=True):
     print(f'Extracting features')
     features = []
     labels = []
+    name_regex = re.compile(r' ([A-Za-z]+)\.')
     for row in data:
         sex_classification = {"male": 0, "female": 1}[row["Sex"]]
         age_classification = -1
@@ -49,18 +50,46 @@ def extract_features(data, extract_labels=True):
             elif age < 80:
                 age_classification = 3
 
+        fare_classification = -1
+        if row["Fare"]:
+            # classification buckets created using a similar fashion to age
+            fare = float(row["Fare"])
+            if fare < 7.91:
+                fare_classification = 0
+            elif fare < 14.454:
+                fare_classification = 1
+            elif fare < 31:
+                fare_classification = 2
+            else:
+                fare_classification = 3
+
+        embark_classification = 0
+        if row["Embarked"]:
+            embark_classification = {"S": 1, "C": 2, "Q": 3}.get(row["Embarked"])
+
         family_size = 1
         if row["SibSp"]:
             family_size += int(row["SibSp"])
         if row["Parch"]:
             family_size += int(row["Parch"])
 
+        title_classification = -1
+        if row["Name"]:
+            regex_match = name_regex.search(row["Name"])
+            if regex_match:
+                title = regex_match.group(1)
+                new_title_classification = {"Mr": 0, "Miss": 1, "Mrs": 2, "Master": 3}.get(title)
+                if new_title_classification is not None:
+                    title_classification = new_title_classification
+
         feature_row = [
             row["Pclass"],
             sex_classification,
             age_classification,
-            family_size
-            # TODO title
+            fare_classification,
+            embark_classification,
+            family_size,
+            title_classification
         ]
         features.append(feature_row)
         if extract_labels:
@@ -71,7 +100,7 @@ def extract_features(data, extract_labels=True):
 def train_classifier(features, labels):
     print(f'Training')
     labels_one_hot = np.identity(2)[labels]
-    rf = RandomForestClassifier(n_estimators=1000, random_state=42)
+    rf = RandomForestClassifier(n_estimators=256, random_state=42)
     rf.fit(features, labels_one_hot)
     return rf
 
@@ -123,5 +152,5 @@ def create_test_predictions():
             writer.writerow({"PassengerId": row["PassengerId"], "Survived": prediction})
 
 
-#_classifier = run_train_with_validation()
+#classifier = run_train_with_validation()
 create_test_predictions()
